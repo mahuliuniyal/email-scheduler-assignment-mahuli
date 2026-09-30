@@ -1,0 +1,127 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id              String            @id @default(uuid())
+  email           String            @unique
+  name            String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  campaigns       Campaign[]
+  senderAccounts  SenderAccount[]
+  oauthConnections OAuthConnection[]
+}
+
+model OAuthConnection {
+  id           String   @id @default(uuid())
+  userId       String
+  provider     String
+  externalId   String?
+  accessToken  String
+  refreshToken String?
+  expiresAt    DateTime?
+  metadata     Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, provider])
+  @@index([provider, externalId])
+}
+
+model SenderAccount {
+  id           String   @id @default(uuid())
+  userId       String
+  provider     String
+  email        String
+  accessToken  String
+  refreshToken String?
+  expiresAt    DateTime?
+
+  user      User       @relation(fields: [userId], references: [id])
+  campaigns Campaign[]
+
+  @@unique([userId, email])
+}
+
+model Campaign {
+  id              String         @id @default(uuid())
+  userId          String
+  senderAccountId String
+  name            String
+  subjectTemplate String
+  bodyTemplate    String
+  hourlyLimit     Int            @default(50)
+  minDelaySeconds Int            @default(2)
+  createdAt       DateTime       @default(now())
+
+  user          User          @relation(fields: [userId], references: [id])
+  senderAccount SenderAccount @relation(fields: [senderAccountId], references: [id])
+  leads         Lead[]
+  emailJobs     EmailJob[]
+
+  @@index([userId, createdAt])
+}
+
+model Lead {
+  id         String     @id @default(uuid())
+  campaignId String
+  email      String
+  firstName  String?
+  lastName   String?
+
+  campaign Campaign   @relation(fields: [campaignId], references: [id])
+  emailJobs EmailJob[]
+
+  @@unique([campaignId, email])
+}
+
+enum JobStatus {
+  PENDING
+  SCHEDULED
+  SENDING
+  SENT
+  FAILED
+}
+
+model EmailJob {
+  id                    String     @id @default(uuid())
+  campaignId            String
+  leadId                String
+  status                JobStatus  @default(PENDING)
+  scheduledFor          DateTime
+  sentAt                DateTime?
+  errorLog              String?
+  attempts              Int        @default(0)
+  idempotencyKey        String     @unique
+  processingStartedAt   DateTime?
+  sendingLeaseExpiresAt DateTime?
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
+
+  campaign Campaign     @relation(fields: [campaignId], references: [id])
+  lead     Lead         @relation(fields: [leadId], references: [id])
+  outbox   EmailOutbox? @relation("EmailJobOutbox")
+
+  @@index([status, scheduledFor])
+  @@index([campaignId, createdAt])
+}
+
+model EmailOutbox {
+  id         String   @id @default(uuid())
+  emailJobId String   @unique
+  payload    Json
+  status     String   @default("PENDING")
+  createdAt  DateTime @default(now())
+
+  emailJob EmailJob @relation("EmailJobOutbox", fields: [emailJobId], references: [id])
+
+  @@index([status, createdAt])
+}
